@@ -7,53 +7,58 @@ client = discord.Client()
 
 
 def create_table():
-    #db = sqlite3.connect('id.db')
     db.execute('''CREATE TABLE ID
                  (SERVER            INT      NOT NULL,
                  CHANNEL           INT      NOT NULL,
+                 LCHANNEL           INT    NOT NULL     DEFAULT 0,
                  ROLE               TEXT    NOT NULL    DEFAULT "DerBotManager");''')
-    #db.close()
 
 def append_table(server_id, channel_id):
-    #db = sqlite3.connect('id.db')
     db.execute(f"INSERT INTO ID (SERVER, CHANNEL) VALUES ({server_id}, {channel_id})")
     db.commit()
-    #db.close()
 
 def delete_value(server_id):
-    #db = sqlite3.connect('id.db')
     db.execute(f"DELETE from ID where server like {server_id}")
     db.commit()
-    #db.close()
 
 def update_value(server_id, channel_id):
     db.execute(f"UPDATE ID set CHANNEL = {channel_id} where SERVER like {server_id}")
     db.commit()
 
 def search_table(value):
-    #db = sqlite3.connect('id.db')
     cursor = db.execute(f"SELECT SERVER, CHANNEL from ID where SERVER like {value}")
     for data in cursor:
         if value == data[0]:
-            #db.close()
             return data[1]
 
-def change_role(role):
-    db.execute(f"UPDATE ID set ROLE = '{role}'")
+def change_role(server, role):
+    db.execute(f"UPDATE ID set ROLE = '{role}' where SERVER like {server}")
     db.commit()
 
-def search_role(role):
-    cursor = db.execute(f"SELECT ROLE from ID where ROLE like '{role}'")
+def search_role(server, role):
+    cursor = db.execute(f"SELECT SERVER, ROLE from ID where ROLE like '{role}' AND SERVER like {server}")
     for data in cursor:
-        if role == data[0]:
-            #db.close()
+        if str(role) == str(data[1]):
             return data[1]
+
+
+#can be implemented in search_table and update_value
+def change_reciever(server, channel):
+    db.execute(f"UPDATE ID set LCHANNEL = {channel} where SERVER like {server}")
+    db.commit()
+
+def search_reciever(server, channel):
+    cursor = db.execute(f"SELECT SERVER, LCHANNEL from ID where LCHANNEL like {channel} AND SERVER like {server}")
+    for data in cursor:
+        if str(channel) == str(data[1]):
+            return data[1]
+
 
 def check_table():
     table = db.execute("""SELECT name FROM sqlite_master WHERE type='table' AND name='ID'; """).fetchall()
     if table == []:  #if table does not exist, create new one
         create_table()
-
+        append_table(0, 0)
 
 @client.event
 async def on_ready():
@@ -67,8 +72,13 @@ async def on_message(message):
 
     if message.content.startswith("$"): #check if user has a specific role
         roles = message.author.roles
+        server = message.guild.id
+
+        print("---------------------------------------------------")
+        print(f"{message.author} from {server} : {message.content}")
+
         for role in roles:
-            if role.name == "DerBotManager":
+            if role.name == search_role(server, role) or role.permissions.administrator:
                 has_permission = True
                 break
             else:
@@ -78,19 +88,23 @@ async def on_message(message):
         embed=discord.Embed(color=0x00daff)
         embed.set_thumbnail(url="https://raw.githubusercontent.com/l0l67/ServerConnector/main/pepega.jpg")
         embed.add_field(name="$help", value="show this message", inline=False)
-        embed.add_field(name="$set-channel", value="Set the channel where messages will be send", inline=True)
-        embed.add_field(name="$delete-config", value="Stop the bot from sending messages", inline=True)
-        embed.add_field(name="$set-role", value="Change the role required to use the bot commands", inline=True)
+        embed.add_field(name="$set-channel", value="Set the channel where messages will be send", inline=False)
+        embed.add_field(name="$set-listen-channel", value="Set the channel where the bot listens for messages", inline=False)
+        embed.add_field(name="$delete-config", value="Stop the bot from sending messages", inline=False)
+        embed.add_field(name="$set-role", value="Change the role required to use the bot commands", inline=False)
         embed.set_footer(text="https://github.com/l0l67/ServerConnector")
         await message.channel.send(embed=embed)
 
-    if message.content.startswith('$set-role') and message.author.top_role.permissions.administrator:
+    if message.content.startswith('$set-role') and has_permission:
         new_role = message.content.split(' ')[1]
-        if search_role(new_role) == None:
-            print("added new")
-            change_role(new_role)
+        server = message.guild.id
+        if search_table(server) == None:
+            append_table(server, int(message.channel.id))
+        if search_role(server, new_role) == None:
+            await message.channel.send(f"New role is {new_role}")
+            change_role(server, new_role)
         else:
-            print("already there")
+            await message.channel.send(f"Already set to {new_role}")
 
 
     if message.content.startswith('$set-channel') and has_permission == True:
@@ -119,9 +133,21 @@ async def on_message(message):
             delete_value(server)
             await message.channel.send(f"Deleted config for this Server, messages will not be send anymore")
 
+    if message.content.startswith('$set-listen-channel'):
+        channel = message.content.split(' ')[1]
+        init_channel = channel
+        server = message.guild.id
+        if discord.utils.find(lambda m: m.name == channel, message.guild.text_channels) != None: #only accepts string channel names not ids
+            if channel.isdigit() == False:  #double check if channel is a string
+                channel = discord.utils.get(message.guild.text_channels, name=channel)
+                channel = channel.id
+            if search_reciever(server, channel) == None:
+                change_reciever(server, channel)
+                await message.channel.send(f"{channel} is now the listening channel")
+            else:
+                await message.channel.send(f"{channel} is already set")
 
-
-    if message.content.startswith('$') == False:
+    if message.content.startswith('$') == False and search_reciever(message.guild.id, message.channel.id) != None:
         msg_author = message.author
         msg_content = message.content
         msg_origin = message.guild
